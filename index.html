@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VolleyPlay - バレー動画分析＆タイムスタンプメモ</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons (軽量アイコンフォント) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            volleyball: {
+              navy: '#0f172a',
+              card: '#1e293b',
+              accent: '#3b82f6',
+              gold: '#f59e0b',
+              emerald: '#10b981',
+              rose: '#f43f5e'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* スムーズスクロールとカスタムスクロールバー */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .video-container {
+      position: relative;
+      padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+      height: 0;
+      overflow: hidden;
+      background-color: #000;
+      border-radius: 0.75rem;
+    }
+    .video-container iframe,
+    .video-container video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+
+  <!-- ヘッダー -->
+  <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 sticky top-0 z-40 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+          <i class="fa-solid fa-volleyball text-white text-lg"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight tracking-wide flex items-center gap-2">
+            VolleyPlay
+            <span class="text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded">GitHub Pages Ready</span>
+          </h1>
+          <p class="text-xs text-slate-400">バレーボール練習動画 タイムスタンプ分析アプリ</p>
+        </div>
+      </div>
+
+      <!-- ヘッダー右側アクション -->
+      <div class="flex items-center space-x-2">
+        <button id="openVideoManagerBtn" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+          <i class="fa-solid fa-film text-blue-400"></i>
+          <span>動画切替</span>
+        </button>
+        <button id="exportDataBtn" title="データをバックアップ(JSON)" class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          <i class="fa-solid fa-download"></i>
+          <span class="hidden sm:inline">エクスポート</span>
+        </button>
+        <label for="importFileInput" title="データを復元" class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer">
+          <i class="fa-solid fa-upload"></i>
+          <span class="hidden sm:inline">インポート</span>
+          <input type="file" id="importFileInput" accept=".json" class="hidden">
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="max-w-7xl mx-auto w-full flex-1 p-3 sm:p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+    <!-- 左カラム：プレイヤー & コントローラー (7カラム) -->
+    <section class="lg:col-span-7 flex flex-col gap-4">
+
+      <!-- 動画プレイヤー枠 -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-2.5 sm:p-3 shadow-xl">
+        <div class="video-container rounded-xl overflow-hidden shadow-inner" id="videoScreenContainer">
+          <!-- YouTube Iframe 埋め込み先 -->
+          <div id="youtubePlayer" class="w-full h-full"></div>
+          <!-- HTML5 Video 埋め込み先 (iPhoneローカルファイル or 直リンク時) -->
+          <video id="html5Video" class="hidden" playsinline controls></video>
+          <!-- 動画未読み込みプレースホルダー -->
+          <div id="emptyVideoNotice" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 p-6 text-center">
+            <div class="w-16 h-16 rounded-full bg-slate-800/80 flex items-center justify-center text-blue-400 mb-3 text-2xl border border-slate-700">
+              <i class="fa-solid fa-play"></i>
+            </div>
+            <h3 class="text-base font-semibold text-slate-200">動画が選択されていません</h3>
+            <p class="text-xs text-slate-400 max-w-sm mt-1 mb-4 leading-relaxed">
+              YouTubeの限定公開リンクを入力するか、iPhoneで撮影した動画ファイルを直接読み込んでください。
+            </p>
+            <div class="flex flex-wrap justify-center gap-2">
+              <button onclick="document.getElementById('openVideoManagerBtn').click()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow-md transition flex items-center gap-2">
+                <i class="fa-brands fa-youtube"></i> YouTube URLを入力
+              </button>
+              <label class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold shadow-md transition cursor-pointer flex items-center gap-2">
+                <i class="fa-solid fa-file-video text-emerald-400"></i> iPhoneの動画を選択
+                <input type="file" id="localVideoQuickInput" accept="video/*" class="hidden">
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 現在再生中情報 & 再生コントロールバー -->
+        <div class="mt-3 px-1">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span id="currentVideoTitleDisplay" class="font-medium text-slate-200 truncate max-w-[70%]">動画未選択</span>
+            <span id="videoCurrentTimeDisplay" class="font-mono bg-slate-800/80 px-2 py-0.5 rounded text-blue-400 font-semibold text-sm tracking-wider">00:00 / 00:00</span>
+          </div>
+
+          <!-- バレー分析用 高度コントロール群 -->
+          <div class="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <!-- 再生制御 -->
+            <div class="flex items-center space-x-1 sm:space-x-1.5">
+              <button id="btnFramePrev" title="0.1秒戻る（コマ戻し）" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 flex items-center justify-center transition">
+                <i class="fa-solid fa-chevron-left text-[11px]"></i>
+              </button>
+              <button id="btnRewind5" title="5秒戻す" class="px-2 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 flex items-center justify-center gap-1 transition">
+                <i class="fa-solid fa-backward text-[11px]"></i>
+                <span class="text-[10px] font-mono">5s</span>
+              </button>
+              <button id="btnPlayPause" title="再生 / 一時停止" class="w-10 h-8 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-95 text-white flex items-center justify-center shadow transition">
+                <i id="playIcon" class="fa-solid fa-play text-xs"></i>
+              </button>
+              <button id="btnForward5" title="5秒進める" class="px-2 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 flex items-center justify-center gap-1 transition">
+                <span class="text-[10px] font-mono">5s</span>
+                <i class="fa-solid fa-forward text-[11px]"></i>
+              </button>
+              <button id="btnFrameNext" title="0.1秒進む（コマ送り）" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 flex items-center justify-center transition">
+                <i class="fa-solid fa-chevron-right text-[11px]"></i>
+              </button>
+            </div>
+
+            <!-- スロー再生速度セレクト -->
+            <div class="flex items-center space-x-1.5">
+              <span class="text-[11px] text-slate-400 font-medium"><i class="fa-solid fa-gauge-high mr-1 text-slate-500"></i>速度:</span>
+              <div class="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700 text-[11px]">
+                <button class="speed-btn px-2 py-0.5 rounded text-slate-400 hover:text-white" data-speed="0.25">0.25x</button>
+                <button class="speed-btn px-2 py-0.5 rounded text-slate-400 hover:text-white" data-speed="0.5">0.5x</button>
+                <button class="speed-btn px-2 py-0.5 rounded text-slate-400 hover:text-white" data-speed="0.75">0.75x</button>
+                <button class="speed-btn px-2 py-0.5 rounded bg-blue-600 text-white font-semibold" data-speed="1.0">1.0x</button>
+              </div>
+            </div>
+
+            <!-- ループ機能スイッチ -->
+            <button id="btnLoopToggle" class="px-2.5 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center gap-1.5 transition text-[11px] border border-transparent">
+              <i class="fa-solid fa-repeat text-xs"></i>
+              <span id="loopLabel">区間ループ: OFF</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- タイムスタンプ即時登録フォーム -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+            <h2 class="font-bold text-sm text-slate-200">タイムスタンプ＆プレーメモを追加</h2>
+          </div>
+          <!-- 現在の再生時間をタイムスタンプ欄に取得するボタン -->
+          <button id="captureCurrentTimeBtn" class="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold shadow-md shadow-blue-500/20 active:scale-95 transition">
+            <i class="fa-solid fa-stopwatch"></i>
+            <span>再生位置を取得</span>
+          </button>
+        </div>
+
+        <form id="stampForm" class="space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div>
+              <label class="block text-[11px] font-medium text-slate-400 mb-1">時間 (MM:SS または秒)</label>
+              <div class="relative">
+                <input type="text" id="stampTimeInput" placeholder="01:23" required class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-blue-400 focus:outline-none focus:border-blue-500 transition">
+              </div>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-[11px] font-medium text-slate-400 mb-1">プレーカテゴリ (ワンタップ選択)</label>
+              <div class="flex flex-wrap gap-1.5" id="quickTagList">
+                <button type="button" class="tag-badge px-2 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:border-blue-500" data-tag="スパイク">スパイク</button>
+                <button type="button" class="tag-badge px-2 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:border-blue-500" data-tag="レシーブ">レシーブ</button>
+                <button type="button" class="tag-badge px-2 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:border-blue-500" data-tag="トス">トス</button>
+                <button type="button" class="tag-badge px-2 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:border-blue-500" data-tag="サーブ">サーブ</button>
+                <button type="button" class="tag-badge px-2 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:border-blue-500" data-tag="ブロック">ブロック</button>
+                <button type="button" class="tag-badge px-2 py-1 rounded text-[11px] font-medium bg-slate-800 text-emerald-400 border border-slate-700 hover:border-emerald-500" data-tag="ナイスプレー">👍 ナイス</button>
+                <button type="button" class="tag-badge px-2 py-1 rounded text-[11px] font-medium bg-slate-800 text-rose-400 border border-slate-700 hover:border-rose-500" data-tag="要改善">⚠️ 要改善</button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">プレーメモ・分析内容</label>
+            <textarea id="stampNoteInput" rows="2" placeholder="例: 助走の最後の踏み込みが流れている。肘をもっと高い位置にキープしてミートする。" required class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition resize-none"></textarea>
+          </div>
+
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-[10px] text-slate-500 flex items-center gap-1">
+              <i class="fa-solid fa-circle-info"></i> 保存すると即座にタイムラインへ追加されます
+            </span>
+            <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-semibold rounded-lg text-xs shadow-lg shadow-blue-500/20 transition flex items-center gap-1.5">
+              <i class="fa-solid fa-plus"></i>
+              <span>メモを登録</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+    </section>
+
+    <!-- 右カラム：タイムスタンプ＆メモ一覧・フィルター (5カラム) -->
+    <section class="lg:col-span-5 flex flex-col gap-4">
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex-1 flex flex-col min-h-[500px]">
+        <!-- タイムライン見出しと検索/絞り込み -->
+        <div class="border-b border-slate-800 pb-3 mb-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-list-check text-blue-400 text-sm"></i>
+              <h2 class="font-bold text-sm text-slate-200">分析タイムライン</h2>
+              <span id="memoCountBadge" class="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded-full font-mono">0 件</span>
+            </div>
+            <!-- CSV出力 -->
+            <button id="exportCsvBtn" title="メモをCSVでダウンロード" class="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition">
+              <i class="fa-solid fa-file-csv text-emerald-400"></i>
+              <span>CSV出力</span>
+            </button>
+          </div>
+
+          <!-- 検索 & タグフィルターバー -->
+          <div class="space-y-2">
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+              <input type="text" id="searchMemoInput" placeholder="メモやタグを検索..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500">
+            </div>
+            <!-- フィルタータグ -->
+            <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[11px]" id="filterTagContainer">
+              <button class="filter-pill active px-2.5 py-0.5 rounded-full bg-blue-600 text-white font-medium whitespace-nowrap" data-filter="all">すべて</button>
+              <button class="filter-pill px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap" data-filter="スパイク">スパイク</button>
+              <button class="filter-pill px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap" data-filter="レシーブ">レシーブ</button>
+              <button class="filter-pill px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap" data-filter="トス">トス</button>
+              <button class="filter-pill px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap" data-filter="サーブ">サーブ</button>
+              <button class="filter-pill px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap" data-filter="ブロック">ブロック</button>
+              <button class="filter-pill px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white whitespace-nowrap" data-filter="要改善">要改善</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- タイムスタンプメモ リストコンテナ -->
+        <div id="memoListContainer" class="flex-1 overflow-y-auto space-y-2.5 pr-1 max-h-[620px]">
+          <!-- メモカードがここに動的挿入される -->
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- モーダル：動画管理・切り替えモーダル -->
+  <div id="videoModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-2xl relative animate-in fade-in duration-200">
+      <button id="closeVideoModalBtn" class="absolute top-4 right-4 text-slate-400 hover:text-white">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <div class="flex items-center gap-2 mb-4">
+        <div class="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center">
+          <i class="fa-solid fa-video"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-base text-slate-100">動画の指定・切り替え</h3>
+          <p class="text-xs text-slate-400">YouTube限定公開URL または iPhoneの動画ファイルを指定</p>
+        </div>
+      </div>
+
+      <!-- 切り替えタブ -->
+      <div class="flex border-b border-slate-800 mb-4 text-xs font-semibold">
+        <button id="tabYoutube" class="flex-1 py-2 text-blue-400 border-b-2 border-blue-500 flex items-center justify-center gap-1.5">
+          <i class="fa-brands fa-youtube text-red-500"></i> YouTube URL
+        </button>
+        <button id="tabLocal" class="flex-1 py-2 text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-file-video text-emerald-400"></i> スマホ端末の動画ファイル
+        </button>
+      </div>
+
+      <!-- YouTube URL入力フォーム -->
+      <div id="panelYoutube" class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">動画タイトル (練習日や大会名など)</label>
+          <input type="text" id="ytVideoTitle" placeholder="例: 11/6 スパイク・ブロック合同練習" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">YouTube URL (限定公開 / 公開)</label>
+          <input type="url" id="ytVideoUrl" placeholder="https://youtu.be/... または https://www.youtube.com/watch?v=..." class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono">
+          <p class="text-[11px] text-slate-500 mt-1">※iPhoneでYouTubeアプリの「共有」→「リンクをコピー」したURLをそのまま貼り付けられます。</p>
+        </div>
+        <button id="saveYoutubeBtn" class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-lg transition">
+          このYouTube動画を読み込む
+        </button>
+      </div>
+
+      <!-- ローカル動画アップロード (IndexedDB保存対応) -->
+      <div id="panelLocal" class="space-y-3 hidden">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">動画タイトル</label>
+          <input type="text" id="localVideoTitle" placeholder="例: 11/6 ゲーム練習動画" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="border-2 border-dashed border-slate-800 hover:border-slate-700 rounded-xl p-5 text-center bg-slate-950/50">
+          <i class="fa-solid fa-cloud-arrow-up text-3xl text-emerald-400 mb-2"></i>
+          <p class="text-xs text-slate-200 font-semibold mb-1">カメラロール・ファイルから保存</p>
+          <p class="text-[11px] text-slate-400 mb-3 leading-relaxed">
+            動画データを端末内の大容量ストレージ（IndexedDB）に完全保存します。<br>
+            <span class="text-emerald-400 font-medium">一度保存すれば、次回アプリを開いたときも自動で動画が読み込まれます！</span>
+          </p>
+          <label class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-md transition">
+            <i class="fa-solid fa-photo-film"></i>
+            <span>カメラロールから選択</span>
+            <input type="file" id="modalLocalFileInput" accept="video/*" class="hidden">
+          </label>
+          <div id="localFileStatus" class="mt-2 text-xs font-mono hidden">
+            <span id="selectedLocalFileName" class="text-emerald-400"></span>
+            <span id="selectedLocalFileSize" class="text-slate-400 ml-1"></span>
+          </div>
+        </div>
+        <button id="saveLocalVideoBtn" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-lg transition disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2" disabled>
+          <span id="saveLocalBtnText">この動画をアプリ内に保存する</span>
+          <i id="saveLocalSpinner" class="fa-solid fa-spinner fa-spin hidden"></i>
+        </button>
+      </div>
+
+      <!-- 過去に登録した動画履歴リスト -->
+      <div class="mt-5 pt-4 border-t border-slate-800">
+        <h4 class="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
+          <span>保存済み動画リスト</span>
+          <span id="savedVideosCount" class="text-[10px] text-slate-500">0本</span>
+        </h4>
+        <div id="savedVideoList" class="space-y-1.5 max-h-36 overflow-y-auto pr-1 text-xs">
+          <!-- 保存済み動画一覧 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- トースト通知用コンテナ (alert代替) -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-16 opacity-0 transition-all duration-300 pointer-events-none bg-slate-800 text-white border border-slate-700 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-medium">
+    <span id="toastIcon" class="text-blue-400"><i class="fa-solid fa-circle-check"></i></span>
+    <span id="toastMessage">完了しました</span>
+  </div>
+
+  <!-- YouTube IFrame API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+
+  <!-- アプリケーション メインロジック -->
+  <script>
+    /**
+     * VolleyPlay - アプリケーション状態管理
+     */
+    const STORAGE_KEY_VIDEOS = 'volleyplay_videos_v1';
+    const STORAGE_KEY_ACTIVE_ID = 'volleyplay_active_video_id';
+    const DB_NAME = 'VolleyPlayVideoDB';
+    const DB_VERSION = 1;
+    const DB_STORE = 'videoBlobs';
+
+    let state = {
+      videos: [], // 各動画: { id, title, type: 'youtube'|'local', url, memoList: [{ id, time, tag, note, createdAt }] }
+      activeVideoId: null,
+      playerType: null, // 'youtube' | 'html5'
+      playbackSpeed: 1.0,
+      loopSegment: null, // { start, end }
+      isLooping: false,
+      activeFilter: 'all',
+      searchQuery: ''
+    };
+
+    // YouTube プレイヤー インスタンス
+    let ytPlayer = null;
+    let ytReady = false;
+    let timeUpdateInterval = null;
+    let currentObjectUrl = null; // ローカル動画用BlobURL解放管理
+
+    // ==========================================
+    // IndexedDB ヘルパー (動画Blobの永続保存)
+    // ==========================================
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(DB_STORE)) {
+            db.createObjectStore(DB_STORE);
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function saveBlobToDB(id, blob) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        const store = tx.objectStore(DB_STORE);
+        const req = store.put(blob, id);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function getBlobFromDB(id) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readonly');
+        const store = tx.objectStore(DB_STORE);
+        const req = store.get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function deleteBlobFromDB(id) {
+      try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(DB_STORE, 'readwrite');
+          const store = tx.objectStore(DB_STORE);
+          const req = store.delete(id);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
+      } catch (e) {
+        console.warn('DB delete error:', e);
+      }
+    }
+
+    // DOM要素参照
+    const el = {
+      videoScreenContainer: document.getElementById('videoScreenContainer'),
+      youtubePlayer: document.getElementById('youtubePlayer'),
+      html5Video: document.getElementById('html5Video'),
+      emptyNotice: document.getElementById('emptyVideoNotice'),
+      currentTitle: document.getElementById('currentVideoTitleDisplay'),
+      timeDisplay: document.getElementById('videoCurrentTimeDisplay'),
+      btnPlayPause: document.getElementById('btnPlayPause'),
+      playIcon: document.getElementById('playIcon'),
+      btnRewind5: document.getElementById('btnRewind5'),
+      btnForward5: document.getElementById('btnForward5'),
+      btnFramePrev: document.getElementById('btnFramePrev'),
+      btnFrameNext: document.getElementById('btnFrameNext'),
+      btnLoopToggle: document.getElementById('btnLoopToggle'),
+      loopLabel: document.getElementById('loopLabel'),
+      captureCurrentTimeBtn: document.getElementById('captureCurrentTimeBtn'),
+      stampForm: document.getElementById('stampForm'),
+      stampTimeInput: document.getElementById('stampTimeInput'),
+      stampNoteInput: document.getElementById('stampNoteInput'),
+      quickTagList: document.getElementById('quickTagList'),
+      memoListContainer: document.getElementById('memoListContainer'),
+      memoCountBadge: document.getElementById('memoCountBadge'),
+      searchMemoInput: document.getElementById('searchMemoInput'),
+      filterTagContainer: document.getElementById('filterTagContainer'),
+      openVideoManagerBtn: document.getElementById('openVideoManagerBtn'),
+      videoModal: document.getElementById('videoModal'),
+      closeVideoModalBtn: document.getElementById('closeVideoModalBtn'),
+      tabYoutube: document.getElementById('tabYoutube'),
+      tabLocal: document.getElementById('tabLocal'),
+      panelYoutube: document.getElementById('panelYoutube'),
+      panelLocal: document.getElementById('panelLocal'),
+      ytVideoTitle: document.getElementById('ytVideoTitle'),
+      ytVideoUrl: document.getElementById('ytVideoUrl'),
+      saveYoutubeBtn: document.getElementById('saveYoutubeBtn'),
+      modalLocalFileInput: document.getElementById('modalLocalFileInput'),
+      localVideoQuickInput: document.getElementById('localVideoQuickInput'),
+      localVideoTitle: document.getElementById('localVideoTitle'),
+      selectedLocalFileName: document.getElementById('selectedLocalFileName'),
+      selectedLocalFileSize: document.getElementById('selectedLocalFileSize'),
+      localFileStatus: document.getElementById('localFileStatus'),
+      saveLocalVideoBtn: document.getElementById('saveLocalVideoBtn'),
+      saveLocalBtnText: document.getElementById('saveLocalBtnText'),
+      saveLocalSpinner: document.getElementById('saveLocalSpinner'),
+      savedVideoList: document.getElementById('savedVideoList'),
+      savedVideosCount: document.getElementById('savedVideosCount'),
+      exportDataBtn: document.getElementById('exportDataBtn'),
+      importFileInput: document.getElementById('importFileInput'),
+      exportCsvBtn: document.getElementById('exportCsvBtn'),
+      toast: document.getElementById('toast'),
+      toastMessage: document.getElementById('toastMessage'),
+      toastIcon: document.getElementById('toastIcon'),
+    };
+
+    /**
+     * トースト通知UI (alert禁止ルール順守)
+     */
+    function showToast(message, type = 'success') {
+      el.toastMessage.textContent = message;
+      if (type === 'success') {
+        el.toastIcon.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
+      } else if (type === 'error') {
+        el.toastIcon.innerHTML = '<i class="fa-solid fa-circle-exclamation text-rose-400"></i>';
+      } else {
+        el.toastIcon.innerHTML = '<i class="fa-solid fa-circle-info text-blue-400"></i>';
+      }
+      el.toast.classList.remove('translate-y-16', 'opacity-0');
+      el.toast.classList.add('translate-y-0', 'opacity-100');
+
+      setTimeout(() => {
+        el.toast.classList.add('translate-y-16', 'opacity-0');
+        el.toast.classList.remove('translate-y-0', 'opacity-100');
+      }, 3000);
+    }
+
+    /**
+     * 秒数を MM:SS または HH:MM:SS にフォーマット
+     */
+    function formatTime(seconds) {
+      if (isNaN(seconds) || seconds < 0) return '00:00';
+      const sec = Math.floor(seconds);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      const mm = String(m).padStart(2, '0');
+      const ss = String(s).padStart(2, '0');
+      if (h > 0) {
+        return `${h}:${mm}:${ss}`;
+      }
+      return `${mm}:${ss}`;
+    }
+
+    /**
+     * MM:SS や HH:MM:SS や 単一秒数をパースして秒数へ変換
+     */
+    function parseTimeToSeconds(timeStr) {
+      if (!timeStr) return 0;
+      const clean = timeStr.trim();
+      if (!isNaN(clean)) {
+        return Math.max(0, parseFloat(clean));
+      }
+      const parts = clean.split(':').map(Number);
+      if (parts.some(isNaN)) return 0;
+      if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      }
+      if (parts.length === 2) {
+        return parts[0] * 60 + parts[1];
+      }
+      return 0;
+    }
+
+    /**
+     * YouTubeの各種URL形式からVideoIDを抽出
+     */
+    function extractYouTubeID(url) {
+      if (!url) return null;
+      const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+      const match = url.match(regExp);
+      return (match && match[2].length === 11) ? match[2] : null;
+    }
+
+    /**
+     * YouTube Iframe API 初期化コールバック
+     */
+    window.onYouTubeIframeAPIReady = function() {
+      ytReady = true;
+      if (state.activeVideoId) {
+        loadActiveVideoToPlayer();
+      }
+    };
+
+    /**
+     * ローカルストレージの保存と復元
+     */
+    function saveStateToStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY_VIDEOS, JSON.stringify(state.videos));
+        if (state.activeVideoId) {
+          localStorage.setItem(STORAGE_KEY_ACTIVE_ID, state.activeVideoId);
+        }
+      } catch (err) {
+        console.error('ストレージ保存エラー:', err);
+      }
+    }
+
+    function loadStateFromStorage() {
+      try {
+        const savedVideos = localStorage.getItem(STORAGE_KEY_VIDEOS);
+        const savedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID);
+        if (savedVideos) {
+          state.videos = JSON.parse(savedVideos);
+        }
+        if (savedActiveId && state.videos.some(v => v.id === savedActiveId)) {
+          state.activeVideoId = savedActiveId;
+        } else if (state.videos.length > 0) {
+          state.activeVideoId = state.videos[0].id;
+        }
+      } catch (e) {
+        console.error('ストレージ読み込み失敗:', e);
+        state.videos = [];
+      }
+    }
+
+    /**
+     * 現在のアクティブな動画オブジェクトを取得
+     */
+    function getActiveVideo() {
+      return state.videos.find(v => v.id === state.activeVideoId) || null;
+    }
+
+    /**
+     * プレイヤーの現在再生時間を取得 (秒単位)
+     */
+    function getCurrentPlayerTime() {
+      if (state.playerType === 'youtube' && ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
+        return ytPlayer.getCurrentTime() || 0;
+      }
+      if (state.playerType === 'html5' && el.html5Video) {
+        return el.html5Video.currentTime || 0;
+      }
+      return 0;
+    }
+
+    /**
+     * プレイヤーの総再生時間を取得 (秒単位)
+     */
+    function getCurrentPlayerDuration() {
+      if (state.playerType === 'youtube' && ytPlayer && typeof ytPlayer.getDuration === 'function') {
+        return ytPlayer.getDuration() || 0;
+      }
+      if (state.playerType === 'html5' && el.html5Video) {
+        return el.html5Video.duration || 0;
+      }
+      return 0;
+    }
+
+    /**
+     * 指定秒数へシーク＆再生
+     */
+    function seekToTime(seconds, autoPlay = true) {
+      const target = Math.max(0, seconds);
+      if (state.playerType === 'youtube' && ytPlayer) {
+        ytPlayer.seekTo(target, true);
+        if (autoPlay) {
+          ytPlayer.playVideo();
+          updatePlayPauseButton(true);
+        }
+      } else if (state.playerType === 'html5' && el.html5Video) {
+        el.html5Video.currentTime = target;
+        if (autoPlay) {
+          el.html5Video.play();
+          updatePlayPauseButton(true);
+        }
+      }
+    }
+
+    /**
+     * 再生/一時停止 切り替え
+     */
+    function togglePlayPause() {
+      if (state.playerType === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+        const pState = ytPlayer.getPlayerState();
+        if (pState === YT.PlayerState.PLAYING) {
+          ytPlayer.pauseVideo();
+          updatePlayPauseButton(false);
+        } else {
+          ytPlayer.playVideo();
+          updatePlayPauseButton(true);
+        }
+      } else if (state.playerType === 'html5' && el.html5Video) {
+        if (el.html5Video.paused) {
+          el.html5Video.play();
+          updatePlayPauseButton(true);
+        } else {
+          el.html5Video.pause();
+          updatePlayPauseButton(false);
+        }
+      }
+    }
+
+    function updatePlayPauseButton(isPlaying) {
+      if (isPlaying) {
+        el.playIcon.classList.remove('fa-play');
+        el.playIcon.classList.add('fa-pause');
+      } else {
+        el.playIcon.classList.remove('fa-pause');
+        el.playIcon.classList.add('fa-play');
+      }
+    }
+
+    /**
+     * 再生速度の設定 (0.25x 〜 2.0x)
+     */
+    function setPlaybackSpeed(speed) {
+      state.playbackSpeed = parseFloat(speed);
+      if (state.playerType === 'youtube' && ytPlayer && typeof ytPlayer.setPlaybackRate === 'function') {
+        ytPlayer.setPlaybackRate(state.playbackSpeed);
+      } else if (state.playerType === 'html5' && el.html5Video) {
+        el.html5Video.playbackRate = state.playbackSpeed;
+      }
+
+      // 速度ボタンのスタイル更新
+      document.querySelectorAll('.speed-btn').forEach(btn => {
+        const bSpeed = parseFloat(btn.dataset.speed);
+        if (bSpeed === state.playbackSpeed) {
+          btn.className = 'speed-btn px-2 py-0.5 rounded bg-blue-600 text-white font-semibold';
+        } else {
+          btn.className = 'speed-btn px-2 py-0.5 rounded text-slate-400 hover:text-white';
+        }
+      });
+      showToast(`再生速度: ${state.playbackSpeed}x`, 'info');
+    }
+
+    /**
+     * 時間表示の定期更新タイマー
+     */
+    function startTimeUpdateLoop() {
+      if (timeUpdateInterval) clearInterval(timeUpdateInterval);
+      timeUpdateInterval = setInterval(() => {
+        const cur = getCurrentPlayerTime();
+        const dur = getCurrentPlayerDuration();
+        el.timeDisplay.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+
+        // 区間ループのチェック
+        if (state.isLooping && state.loopSegment) {
+          if (cur >= state.loopSegment.end || cur < state.loopSegment.start - 0.5) {
+            seekToTime(state.loopSegment.start, true);
+          }
+        }
+      }, 200);
+    }
+
+    /**
+     * アクティブ動画をプレイヤーにロード (IndexedDB対応)
+     */
+    async function loadActiveVideoToPlayer() {
+      const activeVideo = getActiveVideo();
+      if (!activeVideo) {
+        el.emptyNotice.classList.remove('hidden');
+        el.youtubePlayer.classList.add('hidden');
+        el.html5Video.classList.add('hidden');
+        el.currentTitle.textContent = '動画未選択';
+        renderMemoList();
+        return;
+      }
+
+      el.emptyNotice.classList.add('hidden');
+      el.currentTitle.textContent = activeVideo.title || '無題の練習動画';
+
+      // 既存のローカルBlobURLを解放
+      if (currentObjectUrl) {
+        URL.revokeObjectURL(currentObjectUrl);
+        currentObjectUrl = null;
+      }
+
+      if (activeVideo.type === 'youtube') {
+        state.playerType = 'youtube';
+        el.html5Video.classList.add('hidden');
+        el.html5Video.pause();
+        el.youtubePlayer.classList.remove('hidden');
+
+        const ytId = extractYouTubeID(activeVideo.url);
+        if (!ytId) {
+          showToast('YouTube URLが不正です', 'error');
+          return;
+        }
+
+        if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+          ytPlayer.loadVideoById(ytId);
+        } else if (ytReady) {
+          ytPlayer = new YT.Player('youtubePlayer', {
+            videoId: ytId,
+            playerVars: {
+              autoplay: 0,
+              modestbranding: 1,
+              rel: 0,
+              playsinline: 1
+            },
+            events: {
+              onReady: () => {
+                ytPlayer.setPlaybackRate(state.playbackSpeed);
+                startTimeUpdateLoop();
+              },
+              onStateChange: (event) => {
+                if (event.data === YT.PlayerState.PLAYING) {
+                  updatePlayPauseButton(true);
+                } else {
+                  updatePlayPauseButton(false);
+                }
+              }
+            }
+          });
+        }
+      } else if (activeVideo.type === 'local') {
+        state.playerType = 'html5';
+        el.youtubePlayer.classList.add('hidden');
+        if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+          ytPlayer.stopVideo();
+        }
+        el.html5Video.classList.remove('hidden');
+
+        // IndexedDBから動画データを取得してBlobURL生成
+        try {
+          const videoBlob = await getBlobFromDB(activeVideo.id);
+          if (videoBlob) {
+            currentObjectUrl = URL.createObjectURL(videoBlob);
+            el.html5Video.src = currentObjectUrl;
+            el.html5Video.playbackRate = state.playbackSpeed;
+            startTimeUpdateLoop();
+          } else {
+            showToast('動画データが見つかりません。再度選択してください。', 'error');
+          }
+        } catch (err) {
+          console.error('動画取得エラー:', err);
+          showToast('動画の読み込みに失敗しました', 'error');
+        }
+      }
+
+      renderMemoList();
+      renderSavedVideosModalList();
+    }
+
+    /**
+     * メモ一覧のレンダリング
+     */
+    function renderMemoList() {
+      const activeVideo = getActiveVideo();
+      if (!activeVideo || !activeVideo.memoList || activeVideo.memoList.length === 0) {
+        el.memoCountBadge.textContent = '0 件';
+        el.memoListContainer.innerHTML = `
+          <div class="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-500">
+            <i class="fa-regular fa-clipboard text-3xl mb-2 opacity-40"></i>
+            <p class="text-xs">登録されたタイムスタンプメモはありません</p>
+            <p class="text-[11px] text-slate-600 mt-1">動画を再生し、気になる瞬間に「再生位置を取得」を押してメモを追加しましょう！</p>
+          </div>
+        `;
+        return;
+      }
+
+      // フィルタリング & 検索
+      let filtered = [...activeVideo.memoList];
+
+      if (state.activeFilter !== 'all') {
+        filtered = filtered.filter(m => m.tag && m.tag.includes(state.activeFilter));
+      }
+
+      if (state.searchQuery.trim() !== '') {
+        const q = state.searchQuery.toLowerCase();
+        filtered = filtered.filter(m =>
+          (m.note && m.note.toLowerCase().includes(q)) ||
+          (m.tag && m.tag.toLowerCase().includes(q))
+        );
+      }
+
+      // 時間順にソート (昇順)
+      filtered.sort((a, b) => a.time - b.time);
+
+      el.memoCountBadge.textContent = `${filtered.length} 件`;
+
+      if (filtered.length === 0) {
+        el.memoListContainer.innerHTML = `
+          <div class="h-40 flex flex-col items-center justify-center text-center p-6 text-slate-500">
+            <i class="fa-solid fa-filter text-2xl mb-2 opacity-40"></i>
+            <p class="text-xs">条件に合致するメモがありません</p>
+          </div>
+        `;
+        return;
+      }
+
+      el.memoListContainer.innerHTML = filtered.map(item => {
+        let tagBadgeClass = 'bg-slate-800 text-slate-300 border-slate-700';
+        if (item.tag === 'スパイク') tagBadgeClass = 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+        if (item.tag === 'レシーブ') tagBadgeClass = 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+        if (item.tag === 'トス') tagBadgeClass = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30';
+        if (item.tag === 'サーブ') tagBadgeClass = 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+        if (item.tag === 'ブロック') tagBadgeClass = 'bg-orange-500/20 text-orange-300 border-orange-500/30';
+        if (item.tag === 'ナイスプレー') tagBadgeClass = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+        if (item.tag === '要改善') tagBadgeClass = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+
+        return `
+          <div class="group bg-slate-950/80 hover:bg-slate-800/60 border border-slate-800/90 hover:border-slate-700 rounded-xl p-3 transition duration-150 flex flex-col gap-2 relative">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <!-- タイムスタンプジャンプボタン -->
+                <button onclick="seekToTime(${item.time}, true)" class="px-2.5 py-1 rounded-md bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white font-mono text-xs font-bold border border-blue-500/30 transition flex items-center gap-1 active:scale-95 shadow-sm">
+                  <i class="fa-solid fa-play text-[10px]"></i>
+                  <span>${formatTime(item.time)}</span>
+                </button>
+                ${item.tag ? `<span class="text-[10px] px-2 py-0.5 rounded border font-semibold ${tagBadgeClass}">${item.tag}</span>` : ''}
+              </div>
+
+              <!-- 右側クイックアクション (ループ再生・削除) -->
+              <div class="flex items-center space-x-1 opacity-80 group-hover:opacity-100 transition">
+                <button onclick="loopMemoClip(${item.time})" title="このプレー前後3秒を反復ループ再生" class="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-amber-400 transition text-xs">
+                  <i class="fa-solid fa-repeat"></i>
+                </button>
+                <button onclick="deleteMemo('${item.id}')" title="削除" class="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-rose-400 transition text-xs">
+                  <i class="fa-regular fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- メモ本文 -->
+            <p class="text-xs text-slate-200 leading-relaxed break-words whitespace-pre-wrap">${escapeHTML(item.note)}</p>
+          </div>
+        `;
+      }).join('');
+    }
+
+    /**
+     * 特定のメモの前後を反復ループ再生（フォーム確認用）
+     */
+    window.loopMemoClip = function(time) {
+      const startTime = Math.max(0, time - 2);
+      const endTime = time + 3;
+      state.loopSegment = { start: startTime, end: endTime };
+      state.isLooping = true;
+      el.btnLoopToggle.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+      el.loopLabel.textContent = `ループ中: ${formatTime(startTime)} - ${formatTime(endTime)}`;
+      seekToTime(startTime, true);
+      showToast(`プレー反復ループ開始 (${formatTime(startTime)} - ${formatTime(endTime)})`, 'info');
+    };
+
+    /**
+     * メモ削除
+     */
+    window.deleteMemo = function(memoId) {
+      const activeVideo = getActiveVideo();
+      if (!activeVideo) return;
+      activeVideo.memoList = activeVideo.memoList.filter(m => m.id !== memoId);
+      saveStateToStorage();
+      renderMemoList();
+      showToast('メモを削除しました');
+    };
+
+    /**
+     * HTMLエスケープ
+     */
+    function escapeHTML(str) {
+      return str.replace(/[&<>'"]/g,
+        tag => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          "'": '&#39;',
+          '"': '&quot;'
+        }[tag] || tag)
+      );
+    }
+
+    /**
+     * モーダル内：保存済み動画リストの描画
+     */
+    function renderSavedVideosModalList() {
+      el.savedVideosCount.textContent = `${state.videos.length}本`;
+      if (state.videos.length === 0) {
+        el.savedVideoList.innerHTML = `<p class="text-slate-500 text-center py-3">登録された動画はありません</p>`;
+        return;
+      }
+
+      el.savedVideoList.innerHTML = state.videos.map(v => {
+        const isActive = v.id === state.activeVideoId;
+        const isLocal = v.type === 'local';
+        return `
+          <div class="flex items-center justify-between p-2 rounded-lg ${isActive ? 'bg-blue-600/20 border border-blue-500/40' : 'bg-slate-950/70 border border-slate-800'}">
+            <div class="flex items-center gap-2 truncate max-w-[75%] cursor-pointer" onclick="selectVideo('${v.id}')">
+              <i class="${isLocal ? 'fa-solid fa-mobile-screen-button text-emerald-400' : 'fa-brands fa-youtube text-red-500'} text-sm"></i>
+              <div class="truncate">
+                <span class="font-medium text-slate-200 block truncate">${escapeHTML(v.title || '名称未設定')}</span>
+                <span class="text-[10px] text-slate-500">
+                  ${isLocal ? '<span class="text-emerald-400">端末内保存</span> • ' : ''}${v.memoList ? v.memoList.length : 0}件のメモ
+                </span>
+              </div>
+            </div>
+            <div class="flex items-center space-x-1">
+              <button onclick="selectVideo('${v.id}')" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] rounded text-slate-300">開く</button>
+              <button onclick="deleteVideo('${v.id}')" class="p-1 hover:text-rose-400 text-slate-500 transition text-[11px]"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    /**
+     * 動画切り替え
+     */
+    window.selectVideo = function(videoId) {
+      state.activeVideoId = videoId;
+      state.isLooping = false;
+      state.loopSegment = null;
+      el.loopLabel.textContent = '区間ループ: OFF';
+      el.btnLoopToggle.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+
+      saveStateToStorage();
+      loadActiveVideoToPlayer();
+      el.videoModal.classList.add('hidden');
+      showToast('動画を切り替えました');
+    };
+
+    /**
+     * 動画削除 (IndexedDBからも削除)
+     */
+    window.deleteVideo = async function(videoId) {
+      const target = state.videos.find(v => v.id === videoId);
+      if (target && target.type === 'local') {
+        await deleteBlobFromDB(videoId);
+      }
+
+      state.videos = state.videos.filter(v => v.id !== videoId);
+      if (state.activeVideoId === videoId) {
+        state.activeVideoId = state.videos.length > 0 ? state.videos[0].id : null;
+      }
+      saveStateToStorage();
+      renderSavedVideosModalList();
+      loadActiveVideoToPlayer();
+      showToast('動画を削除しました');
+    };
+
+    // ==========================================
+    // イベントリスナー設定
+    // ==========================================
+
+    // 再生・一時停止
+    el.btnPlayPause.addEventListener('click', togglePlayPause);
+
+    // 5秒送り / 5秒戻し
+    el.btnRewind5.addEventListener('click', () => {
+      seekToTime(getCurrentPlayerTime() - 5, true);
+    });
+    el.btnForward5.addEventListener('click', () => {
+      seekToTime(getCurrentPlayerTime() + 5, true);
+    });
+
+    // コマ送り / コマ戻し (0.1秒単位でスロー確認)
+    el.btnFramePrev.addEventListener('click', () => {
+      seekToTime(getCurrentPlayerTime() - 0.1, false);
+    });
+    el.btnFrameNext.addEventListener('click', () => {
+      seekToTime(getCurrentPlayerTime() + 0.1, false);
+    });
+
+    // 速度変更ボタン
+    document.querySelectorAll('.speed-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setPlaybackSpeed(btn.dataset.speed);
+      });
+    });
+
+    // ループ切り替え
+    el.btnLoopToggle.addEventListener('click', () => {
+      if (state.isLooping) {
+        state.isLooping = false;
+        state.loopSegment = null;
+        el.loopLabel.textContent = '区間ループ: OFF';
+        el.btnLoopToggle.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+        showToast('ループ再生を解除しました', 'info');
+      } else {
+        const cur = getCurrentPlayerTime();
+        state.loopSegment = { start: Math.max(0, cur - 2), end: cur + 2 };
+        state.isLooping = true;
+        el.btnLoopToggle.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+        el.loopLabel.textContent = `ループ: ${formatTime(state.loopSegment.start)} - ${formatTime(state.loopSegment.end)}`;
+        seekToTime(state.loopSegment.start, true);
+        showToast('現在位置の前後2秒ループを開始しました', 'info');
+      }
+    });
+
+    // 現在時間キャプチャボタン
+    el.captureCurrentTimeBtn.addEventListener('click', () => {
+      const cur = getCurrentPlayerTime();
+      el.stampTimeInput.value = formatTime(cur);
+      el.stampNoteInput.focus();
+      showToast(`現在時間 ${formatTime(cur)} をセットしました`, 'info');
+    });
+
+    // クイックタグクリックで自動入力
+    let selectedTag = '';
+    el.quickTagList.addEventListener('click', (e) => {
+      const badge = e.target.closest('.tag-badge');
+      if (!badge) return;
+      selectedTag = badge.dataset.tag;
+      // スタイル強調
+      document.querySelectorAll('.tag-badge').forEach(b => b.classList.remove('ring-2', 'ring-blue-500'));
+      badge.classList.add('ring-2', 'ring-blue-500');
+    });
+
+    // タイムスタンプメモフォーム送信
+    el.stampForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const activeVideo = getActiveVideo();
+      if (!activeVideo) {
+        showToast('先に動画を登録してください', 'error');
+        return;
+      }
+
+      const timeInputVal = el.stampTimeInput.value;
+      const noteVal = el.stampNoteInput.value.trim();
+      if (!noteVal) return;
+
+      const seconds = parseTimeToSeconds(timeInputVal);
+
+      const newMemo = {
+        id: 'memo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        time: seconds,
+        tag: selectedTag || 'メモ',
+        note: noteVal,
+        createdAt: new Date().toISOString()
+      };
+
+      if (!activeVideo.memoList) activeVideo.memoList = [];
+      activeVideo.memoList.push(newMemo);
+
+      saveStateToStorage();
+      renderMemoList();
+
+      // リセット
+      el.stampNoteInput.value = '';
+      showToast('タイムスタンプメモを記録しました！');
+    });
+
+    // メモ検索入力
+    el.searchMemoInput.addEventListener('input', (e) => {
+      state.searchQuery = e.target.value;
+      renderMemoList();
+    });
+
+    // メモタグフィルター
+    el.filterTagContainer.addEventListener('click', (e) => {
+      const pill = e.target.closest('.filter-pill');
+      if (!pill) return;
+      document.querySelectorAll('.filter-pill').forEach(p => {
+        p.classList.remove('active', 'bg-blue-600', 'text-white');
+        p.classList.add('bg-slate-800', 'text-slate-400');
+      });
+      pill.classList.remove('bg-slate-800', 'text-slate-400');
+      pill.classList.add('active', 'bg-blue-600', 'text-white');
+      state.activeFilter = pill.dataset.filter;
+      renderMemoList();
+    });
+
+    // モーダル開閉
+    el.openVideoManagerBtn.addEventListener('click', () => {
+      renderSavedVideosModalList();
+      el.videoModal.classList.remove('hidden');
+    });
+    el.closeVideoModalBtn.addEventListener('click', () => {
+      el.videoModal.classList.add('hidden');
+    });
+    el.videoModal.addEventListener('click', (e) => {
+      if (e.target === el.videoModal) el.videoModal.classList.add('hidden');
+    });
+
+    // モーダルタブ切り替え
+    el.tabYoutube.addEventListener('click', () => {
+      el.tabYoutube.className = 'flex-1 py-2 text-blue-400 border-b-2 border-blue-500 flex items-center justify-center gap-1.5';
+      el.tabLocal.className = 'flex-1 py-2 text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5';
+      el.panelYoutube.classList.remove('hidden');
+      el.panelLocal.classList.add('hidden');
+    });
+    el.tabLocal.addEventListener('click', () => {
+      el.tabLocal.className = 'flex-1 py-2 text-emerald-400 border-b-2 border-emerald-500 flex items-center justify-center gap-1.5';
+      el.tabYoutube.className = 'flex-1 py-2 text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5';
+      el.panelLocal.classList.remove('hidden');
+      el.panelYoutube.classList.add('hidden');
+    });
+
+    // YouTube動画登録
+    el.saveYoutubeBtn.addEventListener('click', () => {
+      const url = el.ytVideoUrl.value.trim();
+      const title = el.ytVideoTitle.value.trim() || 'YouTube 練習動画';
+
+      const ytId = extractYouTubeID(url);
+      if (!ytId) {
+        showToast('有効なYouTube URLを入力してください', 'error');
+        return;
+      }
+
+      const newVideo = {
+        id: 'yt_' + Date.now(),
+        type: 'youtube',
+        title: title,
+        url: url,
+        memoList: []
+      };
+
+      state.videos.unshift(newVideo);
+      state.activeVideoId = newVideo.id;
+      saveStateToStorage();
+      loadActiveVideoToPlayer();
+
+      el.ytVideoUrl.value = '';
+      el.ytVideoTitle.value = '';
+      el.videoModal.classList.add('hidden');
+      showToast('YouTube動画を追加しました！');
+    });
+
+    // ==========================================
+    // ローカル動画のIndexedDB永続保存ロジック
+    // ==========================================
+    let pendingFileToSave = null;
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function onFileChosen(file) {
+      if (!file) return;
+      pendingFileToSave = file;
+      el.selectedLocalFileName.textContent = file.name;
+      el.selectedLocalFileSize.textContent = `(${formatFileSize(file.size)})`;
+      el.localFileStatus.classList.remove('hidden');
+      el.saveLocalVideoBtn.disabled = false;
+      if (!el.localVideoTitle.value.trim()) {
+        el.localVideoTitle.value = file.name.replace(/\.[^/.]+$/, "");
+      }
+    }
+
+    async function processSaveLocalVideo() {
+      if (!pendingFileToSave) return;
+
+      const file = pendingFileToSave;
+      const videoId = 'local_' + Date.now();
+      const title = el.localVideoTitle.value.trim() || file.name.replace(/\.[^/.]+$/, "");
+
+      // ボタンをローディング表示
+      el.saveLocalBtnText.textContent = '保存中（端末内に書き込み中）...';
+      el.saveLocalSpinner.classList.remove('hidden');
+      el.saveLocalVideoBtn.disabled = true;
+
+      try {
+        // IndexedDBにBlobを保存
+        await saveBlobToDB(videoId, file);
+
+        const newVideo = {
+          id: videoId,
+          type: 'local',
+          title: title,
+          size: file.size,
+          memoList: []
+        };
+
+        state.videos.unshift(newVideo);
+        state.activeVideoId = newVideo.id;
+        saveStateToStorage();
+        await loadActiveVideoToPlayer();
+
+        // フォームリセット
+        pendingFileToSave = null;
+        el.localFileStatus.classList.add('hidden');
+        el.localVideoTitle.value = '';
+        el.modalLocalFileInput.value = '';
+        el.videoModal.classList.add('hidden');
+        showToast('動画をアプリ内に保存しました！次回もそのまま見返せます');
+      } catch (err) {
+        console.error('保存失敗:', err);
+        showToast('動画の保存に失敗しました（容量不足の可能性があります）', 'error');
+      } finally {
+        el.saveLocalBtnText.textContent = 'この動画をアプリ内に保存する';
+        el.saveLocalSpinner.classList.add('hidden');
+        el.saveLocalVideoBtn.disabled = false;
+      }
+    }
+
+    el.modalLocalFileInput.addEventListener('change', (e) => {
+      onFileChosen(e.target.files[0]);
+    });
+
+    el.localVideoQuickInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        onFileChosen(file);
+        // モーダルを開いて即保存確認
+        el.openVideoManagerBtn.click();
+        el.tabLocal.click();
+      }
+    });
+
+    el.saveLocalVideoBtn.addEventListener('click', processSaveLocalVideo);
+
+    // データエクスポート (JSON)
+    el.exportDataBtn.addEventListener('click', () => {
+      if (state.videos.length === 0) {
+        showToast('エクスポートするデータがありません', 'info');
+        return;
+      }
+      const exportData = state.videos.map(v => ({
+        id: v.id,
+        title: v.title,
+        type: v.type,
+        url: v.type === 'youtube' ? v.url : '',
+        memoList: v.memoList || []
+      }));
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `volleyplay_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast('データをエクスポートしました');
+    });
+
+    // データインポート (JSON)
+    el.importFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const imported = JSON.parse(event.target.result);
+          if (Array.isArray(imported)) {
+            state.videos = imported;
+            if (state.videos.length > 0) {
+              state.activeVideoId = state.videos[0].id;
+            }
+            saveStateToStorage();
+            loadActiveVideoToPlayer();
+            showToast('データを正常に復元しました！');
+          } else {
+            showToast('データ形式が正しくありません', 'error');
+          }
+        } catch (err) {
+          showToast('JSONファイルの読み込みに失敗しました', 'error');
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // CSVエクスポート
+    el.exportCsvBtn.addEventListener('click', () => {
+      const activeVideo = getActiveVideo();
+      if (!activeVideo || !activeVideo.memoList || activeVideo.memoList.length === 0) {
+        showToast('出力するメモがありません', 'info');
+        return;
+      }
+
+      let csv = '\uFEFF時間(秒),タイムスタンプ,カテゴリ,メモ本文\n';
+      activeVideo.memoList.forEach(m => {
+        const timeFormatted = formatTime(m.time);
+        const noteEscaped = `"${(m.note || '').replace(/"/g, '""')}"`;
+        const tagEscaped = `"${(m.tag || '').replace(/"/g, '""')}"`;
+        csv += `${m.time},${timeFormatted},${tagEscaped},${noteEscaped}\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${activeVideo.title || 'volley_memos'}_analysis.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast('CSVファイルをダウンロードしました');
+    });
+
+    // キーボードショートカット
+    window.addEventListener('keydown', (e) => {
+      if (['input', 'textarea'].includes(document.activeElement.tagName.toLowerCase())) {
+        return;
+      }
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlayPause();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        seekToTime(getCurrentPlayerTime() - (e.shiftKey ? 1 : 5), true);
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        seekToTime(getCurrentPlayerTime() + (e.shiftKey ? 1 : 5), true);
+      }
+    });
+
+    // アプリ起動時の初期ロード
+    window.onload = function() {
+      loadStateFromStorage();
+      if (state.videos.length === 0) {
+        state.videos = [{
+          id: 'sample_video_1',
+          type: 'youtube',
+          title: '【サンプル】バレーボール練習動画サンプル',
+          url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+          memoList: [
+            { id: 'm1', time: 5, tag: 'スパイク', note: '助走の3歩目のストライドを大きく取る。ブロックの枚数を空中で確認できている。', createdAt: new Date().toISOString() },
+            { id: 'm2', time: 18, tag: '要改善', note: 'トスがアンテナ側に低かったため、体勢を崩してミートが甘くなった。', createdAt: new Date().toISOString() },
+            { id: 'm3', time: 35, tag: 'ナイスプレー', note: 'ディグの位置取りが完璧。ボールの軌道に素早く回り込めている。', createdAt: new Date().toISOString() }
+          ]
+        }];
+        state.activeVideoId = 'sample_video_1';
+        saveStateToStorage();
+      }
+      loadActiveVideoToPlayer();
+    };
+  </script>
+</body>
+</html>
